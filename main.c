@@ -42,6 +42,8 @@ static const char usage[] =
   -a\t\tAdd a password entry\n\
   -d label\tDelete entry with label\n\
   -s\t\tShow passwords (enable echo when typing)\n\
+  -l\t\tList all entries\n\
+  -h\t\tShow this help\n\
 \n";
 
 
@@ -197,6 +199,18 @@ int passcheck_cb(void *flag, int argc, char **argv, char **colnames){
 
 }
 
+int passlist_cb(void *unused, int argc, char **argv, char **colnames){
+	if (argc < 2)
+		return 0;
+
+	char *date = argv[0];
+	char *label = argv[1];
+
+	fprintf(stdout, "Date: %s | %s\n", date, label);
+
+	return 0;
+}
+
 int main(int argc, char **argv){
 
 	int err;
@@ -208,10 +222,11 @@ int main(int argc, char **argv){
 	int addflag = 0;
 	int showflag = 0;
 	int delflag = 0;
+	int listflag = 0;
 	int initdb = 0;
 	int c;
 
-	while ((c = getopt (argc, argv, "asd:")) != -1){
+	while ((c = getopt (argc, argv, "asd:lh")) != -1){
 		switch (c){
 			case 'a':
 				addflag = 1;
@@ -223,6 +238,10 @@ int main(int argc, char **argv){
 				delflag = 1;
 				dellabel = optarg;
 				break;
+			case 'l':
+				listflag = 1;
+				break;
+			case 'h':
 			default:
 				fprintf(stdout, usage);
 				exit(0);
@@ -264,6 +283,23 @@ int main(int argc, char **argv){
 			sqlite3_close(db);
 			exit(1);
 		}
+	}
+
+	if (listflag){
+
+		int err;
+		char *err_msg;
+
+		err = sqlite3_exec(db, "SELECT created, label FROM passwords ORDER BY label ASC", passlist_cb, NULL, &err_msg);
+
+		if (err != SQLITE_OK){
+			fprintf(stderr, "SQL SELECT error: %s\n", err_msg);
+			sqlite3_free(err_msg);
+			sqlite3_close(db);
+			exit(1);
+		}
+
+		exit(0);
 	}
 
 	if (delflag){
