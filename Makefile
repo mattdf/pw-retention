@@ -1,8 +1,8 @@
 CC = gcc
 CFLAGS = -W -Wall
-LIBS = -lssl
+LIBS = -lssl -lsqlite3
 
-pwret: main.c
+pwret: main.c fs.c
 	$(CC) $(CFLAGS)  $^ -o $@ $(LIBS)
 
 clean:
