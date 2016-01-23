@@ -40,8 +40,9 @@ static const char usage[] =
 "usage: pwret [options]\n\
   \n\
   -a\t\tAdd a password entry\n\
+  -d label\tDelete entry with label\n\
   -s\t\tShow passwords (enable echo when typing)\n\
-	\n";
+\n";
 
 
 void gensalt(char *dest, size_t length) {
@@ -73,6 +74,61 @@ void sha512(char *string, char *salt, char outputBuffer[SHA512_OUTPUT])
 		sprintf(outputBuffer + (i * 2), "%02x", hash[i]);
 	}
 	outputBuffer[SHA512_OUTPUT-1] = 0;
+}
+
+int sql_label_exists(sqlite3 *db, char *label){
+
+		int entries;
+		int err;
+		sqlite3_stmt *res;
+
+		err = sqlite3_prepare_v2(db, "SELECT count(*) from passwords WHERE label = ?;", -1, &res, 0);
+		if (err != SQLITE_OK){
+			fprintf(stderr, "SQL prepare failure: %s\n",  sqlite3_errmsg(db));
+			sqlite3_close(db);
+			exit(1);
+		}
+		else {
+			sqlite3_bind_text(res, 1, label, strlen(label), NULL);
+		}
+
+		err = sqlite3_step(res);
+
+		if (err == SQLITE_ROW){
+			entries = sqlite3_column_int(res, 0);
+		}
+
+		sqlite3_finalize(res);
+
+		return entries;
+
+}
+
+void sql_label_delete(sqlite3 *db, char *label){
+
+		int err;
+		sqlite3_stmt *res;
+
+		err = sqlite3_prepare_v2(db, "DELETE from passwords WHERE label = ?;", -1, &res, 0);
+		if (err != SQLITE_OK){
+			fprintf(stderr, "SQL prepare failure: %s\n",  sqlite3_errmsg(db));
+			sqlite3_close(db);
+			exit(1);
+		}
+		else {
+			sqlite3_bind_text(res, 1, label, strlen(label), NULL);
+		}
+
+		err = sqlite3_step(res);
+
+		if (err != SQLITE_OK && err != SQLITE_DONE){
+			fprintf(stderr, "Failed to execute prepared insert: %s\n", sqlite3_errmsg(db));
+			sqlite3_close(db);
+			exit(1);
+		}
+
+		sqlite3_finalize(res);
+
 }
 
 int stdin_prompt(char *msg, char **buffer){
@@ -148,13 +204,14 @@ int main(int argc, char **argv){
 	sqlite3 *db;
 	char dbpath[PATH_MAX] = {0};
 
+	char *dellabel = NULL;
 	int addflag = 0;
 	int showflag = 0;
+	int delflag = 0;
 	int initdb = 0;
 	int c;
 
-
-	while ((c = getopt (argc, argv, "as")) != -1){
+	while ((c = getopt (argc, argv, "asd:")) != -1){
 		switch (c){
 			case 'a':
 				addflag = 1;
@@ -162,10 +219,19 @@ int main(int argc, char **argv){
 			case 's':
 				showflag = 1;
 				break;
+			case 'd':
+				delflag = 1;
+				dellabel = optarg;
+				break;
 			default:
 				fprintf(stdout, usage);
 				exit(0);
 		}
+	}
+
+	if (addflag & delflag){
+		fprintf(stderr, "Specify either -a or -d, not both\n");
+		exit(1);
 	}
 
 	if (fs_datadir_init(DATA_DIR)){
@@ -200,6 +266,36 @@ int main(int argc, char **argv){
 		}
 	}
 
+	if (delflag){
+
+		int err;
+		char *yn;
+
+		if (sql_label_exists(db, dellabel) == 0){
+			fprintf(stderr, "A password with that label does not exist\n");
+			sqlite3_close(db);
+			exit(1);
+		}
+
+		fprintf(stdout, "You are about to delete the entry labeled ``%s''\n", dellabel);
+
+		err = stdin_prompt("Continue [yn]", &yn);
+		if (err != 0){
+			exit(0);
+		}
+
+		if (strcmp("y", yn) == 0){
+
+			sql_label_delete(db, dellabel);
+
+			puts("Entry deleted.");
+
+		}
+
+		exit(0);
+
+	}
+
 	if (addflag){
 
 		char *label, *pass;
@@ -212,8 +308,20 @@ int main(int argc, char **argv){
 
 		puts("Adding new password");
 
-		if (stdin_prompt("label", &label) || stdin_prompt("pass", &pass)){
-			fprintf(stderr, "stdin error");
+		if (stdin_prompt("label", &label)){
+			sqlite3_close(db);
+			fprintf(stderr, "entry canceled\n");
+			exit(1);
+		}
+
+		if (sql_label_exists(db, label) != 0){
+			fprintf(stderr, "A password with that label already exists.\n");
+			exit(1);
+		}
+
+		if (stdin_prompt("pass", &pass)){
+			sqlite3_close(db);
+			fprintf(stderr, "entry canceled\n");
 			exit(1);
 		}
 
